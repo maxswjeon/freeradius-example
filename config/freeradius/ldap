@@ -1,0 +1,85 @@
+ldap {
+	server   = {{ LDAP_SERVER }}
+	port     = {{ LDAP_PORT }}
+	identity = {{ LDAP_BIND_DN }}
+	password = {{ LDAP_BIND_PW }}
+	base_dn  = {{ LDAP_BASE_DN }}
+	tls {
+		start_tls = yes
+		ca_file = /certs/chain.pem
+		require_cert = demand
+	}
+	sasl {
+	}
+	global {
+	}
+	update {
+		&control:Password-With-Header += 'sambaNTPassword'
+		&control:                     += 'radiusControlAttribute'
+	        &request:                     += 'radiusRequestAttribute'
+                &reply:                       += 'radiusReplyAttribute'
+	}
+	user {
+		base_dn = "ou=people,${..base_dn}"
+		filter = "(&(objectClass=student)(uid=%{%{Stripped-User-Name}:-%{User-Name}}))"
+		sasl {
+		}
+	}
+	group {
+		base_dn = "ou=groups,${..base_dn}"
+		filter = "(objectClass=groupOfNames)"
+		membership_attribute  = 'member'
+		group_attribute = "{.:instance}-Group"
+	}
+	profile {
+	}
+	accounting {
+		reference = "%{tolower:type.%{Acct-Status-Type}}"
+		type {
+			start {
+				update {
+					description := "Online at %S"
+				}
+			}
+			interim-update {
+				update {
+					description := "Last seen at %S"
+				}
+			}
+			stop {
+				update {
+					description := "Offline at %S"
+				}
+			}
+		}
+	}
+	post-auth {
+		update {
+			description := "Authenticated at %S"
+		}
+	}
+	options {
+		chase_referrals = yes
+		rebind = yes
+		use_referral_credentials = no
+		res_timeout = 10
+		srv_timelimit = 3
+		idle = 60
+		probs = 3
+		interval = 3
+		ldap_debug = 0x0000
+	}
+	tls {
+	}
+	pool {
+		start = 1
+		min = 1
+		max = 5
+		spare = 1
+		users = 0
+		retry_delay = 30
+		lifetime = 0
+		idle_timeout = 60
+		connect_timeout = 3.0
+	}
+}

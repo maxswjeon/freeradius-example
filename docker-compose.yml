@@ -1,0 +1,99 @@
+version: "3.10"
+services:
+  certbot:
+    image: certbot/dns-cloudflare:latest
+    restart: always
+    entrypoint: /docker-entrypoint.sh
+    healthcheck:
+      test: ["CMD", "cat", "/healthy"]
+      interval: 10s
+      timeout: 10s
+      retries: 9
+      start_period: 0s
+    environment:
+      - MAIL=${MAIL}
+      - DOMAIN=${DOMAIN}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+    volumes:
+      - ./scripts/certbot/docker-entrypoint.sh:/docker-entrypoint.sh
+      - ./data/certs:/certs
+      - ./data/certbot:/etc/letsencrypt
+  database:
+    image: postgres:14
+    restart: always
+    ports:
+      - ${DATABASE_PORT}:5432
+    environment:
+      - POSTGRES_USER=freeradius
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+      - POSTGRES_DB=freeradius
+      - PGDATA=/data
+      - TZ=Asia/Seoul
+    volumes:
+      - ./data/database:/data
+      - ./scripts/database/initdb.d:/docker-entrypoint-initdb.d
+  openldap:
+    image: tiredofit/openldap:latest
+    restart: always
+    depends_on:
+      certbot:
+        condition: service_healthy
+    ports:
+      - ${OPENLDAP_LDAP_PORT}:389
+      - ${OPENLDAP_LDAPS_PORT}:636
+    environment:
+      - DOMAIN=${DOMAIN}
+      - BASE_DN=${LDAP_BASE_DN}
+      - ADMIN_PASS=${LDAP_ADMIN_PASSWORD}
+      - CONFIG_PASS=${LDAP_CONFIG_PASSWORD}
+      - ORGANIZATION=Codingbear at Ubucon 2022
+      - ADD_DEFAULT_DATA=true
+      - ENABLE_READONLY_USER=true
+      - READONLY_USER_USER=readonly
+      - READONLY_USER_PASS=${LDAP_READONLY_PASSWORD}
+      - SCHEMA_TYPE=nis
+      - ENABLE_BACKUP=false
+      - ENABLE_PPOLICY=true
+      - ENABLE_TLS=true
+      - TLS_CREATE_CA=false
+      - TLS_CA_CRT_FILENAME=chain.pem
+      - TLS_CA_CRT_PATH=/certs
+      - TLS_CRT_FILENAME=fullchain.pem
+      - TLS_KEY_FILENAME=privkey.pem
+      - TLS_DH_PARAM_FILENAME=dhparam
+      - TLS_DH_PARAM_PATH=/
+      - TLS_ENFORCE=true
+      - TZ=Asia/Seoul
+    volumes:
+      - ./data/ldap:/var/lib/openldap
+      - ./config/ldap:/etc/openldap/slapd.d
+      - ./data/certs/ldap:/certs
+      - ./data/dhparam:/dhparam
+      - ./scripts/ldap:/assets/custom-scripts
+  freeradius:
+    image: freeradius/freeradius-server:latest
+    restart: always
+    depends_on:
+      database:
+        condition: service_started
+      certbot:
+        condition: service_healthy
+    entrypoint: /docker-entrypoint.sh
+    ports:
+      - ${FREERADIUS_AUTH_PORT}:1812
+      - ${FREERADIUS_ACCT_PORT}:1813
+      - ${FREERADIUS_AUTH_PORT}:1812/udp
+      - ${FREERADIUS_ACCT_PORT}:1813/udp
+    environment:
+      - DOMAIN=${DOMAIN}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD}
+      - LDAP_SERVER=${DOMAIN}
+      - LDAP_PORT=${OPENLDAP_LDAP_PORT}
+      - LDAP_BASE_DN=${LDAP_BASE_DN}
+      - LDAP_BIND_PW=${LDAP_ADMIN_PASSWORD}
+      - RADIUS_PASSWORD=${RADIUS_PASSWORD}
+    volumes:
+      - ./config/freeradius:/config:ro
+      - ./scripts/freeradius/docker-entrypoint.sh:/docker-entrypoint.sh
+      - ./scripts/freeradius/init.d:/docker-entrypoint.d
+      - ./data/certs/freeradius:/certs
